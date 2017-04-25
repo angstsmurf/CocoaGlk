@@ -33,8 +33,18 @@ Opcode* gOpcodeTable;
 // -------------------------------------------------------------
 // Floating point support
 
-#define ENCODE_FLOAT(f) (* (git_uint32*) &f)
-#define DECODE_FLOAT(n) (* (git_float*) &n)
+GIT_INLINE git_uint32 ENCODE_FLOAT(git_float f)
+{
+  git_uint32 n;
+  memcpy(&n, &f, 4);
+  return n;
+}
+
+GIT_INLINE git_float DECODE_FLOAT(git_uint32 n) {
+  git_float f;
+  memcpy(&f, &n, 4);
+  return f;
+}
 
 int floatCompare(git_sint32 L1, git_sint32 L2, git_sint32 L3)
 {
@@ -74,7 +84,6 @@ void startProgram (size_t cacheSize, enum IOMode ioMode)
     git_sint32* top;    // The top of the stack -- that is, the first unusable slot.
 
     git_sint32 args [64]; // Array of arguments. Count is stored in L2.
-    git_uint32 runCounter = 0;
 
     git_uint32 ioRock = 0;
 
@@ -85,8 +94,8 @@ void startProgram (size_t cacheSize, enum IOMode ioMode)
     git_uint32 protectPos = 0;
     git_uint32 protectSize = 0;
     
-    git_uint32 glulxPC = 0;
-    git_uint32 glulxOpcode = 0;
+    git_uint32 maybe_unused glulxPC = 0;
+    git_uint32 maybe_unused glulxOpcode = 0;
 
     acceleration_func accelfunc;
 
@@ -121,12 +130,11 @@ void startProgram (size_t cacheSize, enum IOMode ioMode)
     goto do_enter_function_L1;
 
 #ifdef USE_DIRECT_THREADING
-#define NEXT do { ++runCounter; goto **(pc++); } while(0)
+#define NEXT do { goto **(pc++); } while(0)
 #else
 #define NEXT goto next
 //#define NEXT do { CHECK_USED(0); CHECK_FREE(0); goto next; } while (0)
 next:
-    ++runCounter;
     switch (*pc++)
     {
 #define LABEL(foo) case label_ ## foo: goto do_ ## foo;
@@ -192,15 +200,11 @@ do_S1_addr8:  memWrite8 (READ_PC, S1); NEXT;
 #define UL7 ((git_uint32)L7)
 
 do_recompile:
-    gBlockHeader->runCounter = runCounter;
     pc = compile (READ_PC);
-    runCounter = 0;
 	NEXT;
 	
 do_jump_abs_L7:
-    gBlockHeader->runCounter = runCounter;
     pc = getCode (UL7);
-    runCounter = gBlockHeader->runCounter;
     NEXT;
 
 do_enter_function_L1: // Arg count is in L2.
@@ -475,7 +479,7 @@ do_enter_function_L1: // Arg count is in L2.
 
 finish_undo_stub:
         PUSH (READ_PC);             // PC
-        PUSH ((git_sint32) (frame - base) * 4);  // FramePtr
+        PUSH ((git_sint32) ((frame - base) * 4));  // FramePtr
         saveUndo (base, sp);
         S1 = 0;
         goto do_pop_call_stub;
@@ -516,7 +520,7 @@ finish_undo_stub:
 
 finish_save_stub:
         PUSH (READ_PC);                        // PC
-        PUSH ((git_sint32) (frame - base) * 4);  // FramePtr
+        PUSH ((git_sint32) ((frame - base) * 4));  // FramePtr
         if (ioMode == IO_GLK)
             S1 = saveToFile (base, sp, L1);
         else
@@ -543,14 +547,14 @@ finish_save_stub:
     do_catch_stub_addr:
         CHECK_FREE(4);
         L7 = READ_PC;
-        memWrite32(L7, (git_sint32) (sp-base+4)*4);
+        memWrite32(L7, (git_uint32) ((sp-base+4)*4));
         PUSH (1);       // DestType
         goto finish_catch_stub_addr_L7;
 
     do_catch_stub_local:
         CHECK_FREE(4);
         L7 = READ_PC;
-        LOCAL(L7 / 4) = (git_sint32) (sp-base+4)*4;
+        LOCAL(L7 / 4) = (git_sint32) ((sp-base+4)*4);
         PUSH (2);       // DestType
         goto finish_catch_stub_addr_L7;
 
@@ -559,15 +563,15 @@ finish_save_stub:
         PUSH (3);                  // DestType
         PUSH (0);                  // DestAddr
         PUSH (READ_PC);            // PC
-        PUSH ((git_sint32) (frame - base) * 4); // FramePtr
-        L7 = (git_sint32) (sp - base)*4;        // Catch token.
+        PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
+        L7 = (git_sint32) ((sp - base)*4);        // Catch token.
 	    PUSH (L7);
         NEXT;
 
 finish_catch_stub_addr_L7:
         PUSH (L7);                 // DestAddr
         PUSH (READ_PC);            // PC
-        PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+        PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
         NEXT;
 
     do_throw:
@@ -602,7 +606,7 @@ do_call_stub_discard:
 
 finish_call_stub:
         PUSH (READ_PC);             // PC
-        PUSH ((git_sint32) (frame - base) * 4);  // FramePtr
+        PUSH ((git_sint32) ((frame - base) * 4));  // FramePtr
         goto do_enter_function_L1;
     
 do_tailcall:
@@ -750,7 +754,7 @@ do_tailcall:
             PUSH(12); // DestType
             PUSH(L6); // DestAddr (next digit)
             PUSH(L7); // PC       (number to print)
-            PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+            PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
 
             // Call the filter function.
             L1 = ioRock;
@@ -783,7 +787,7 @@ do_tailcall:
             PUSH(13); // DestType (resume C string)
             PUSH(L6); // DestAddr (ignored)
             PUSH(L7); // PC       (next char to print)
-            PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+            PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
             // Call the filter function.
             L1 = ioRock;
             L2 = 1;
@@ -815,7 +819,7 @@ do_tailcall:
             PUSH(14); // DestType (resume Unicode string)
             PUSH(L6); // DestAddr (ignored)
             PUSH(L7); // PC       (next char to print)
-            PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+            PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
             // Call the filter function.
             L1 = ioRock;
             L2 = 1;
@@ -896,7 +900,7 @@ do_tailcall:
                     PUSH(10); // DestType
                     PUSH(L6); // DestAddr (bit number in string)
                     PUSH(L7); // PC       (byte address in string)
-                    PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+                    PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
                     // Call the filter function.
                     L1 = ioRock;
                     L2 = 1;
@@ -910,7 +914,7 @@ do_tailcall:
                 PUSH (10); // DestType
                 PUSH (L6); // DestAddr (bit number in string)
                 PUSH (L7); // PC       (byte address in string)
-                PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+                PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
                 // Print the C string.
                 L7 = L1;
                 goto resume_c_string_L7;
@@ -937,7 +941,7 @@ do_tailcall:
                     PUSH(10); // DestType
                     PUSH(L6); // DestAddr (bit number in string)
                     PUSH(L7); // PC       (byte address in string)
-                    PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+                    PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
                     // Call the filter function.
                     L1 = ioRock;
                     L2 = 1;
@@ -951,7 +955,7 @@ do_tailcall:
                 PUSH (10); // DestType
                 PUSH (L6); // DestAddr (bit number in string)
                 PUSH (L7); // PC       (byte address in string)
-                PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+                PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
                 // Print the Unicode string.
                 L7 = L1;
                 goto resume_uni_string_L7;
@@ -978,7 +982,7 @@ do_tailcall:
                 PUSH (10); // DestType
                 PUSH (L6); // DestAddr (bit number in string)
                 PUSH (L7); // PC       (byte address in string)
-                PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+                PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
                 // Check the type of the embedded object.
                 switch (memRead8(L3))
                 {
@@ -1018,7 +1022,7 @@ do_tailcall:
         PUSH (11);                            // DestType
         PUSH (0);                             // Addr
         PUSH (READ_PC);                       // PC
-        PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+        PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
 
         // Load the string's type byte.
         L2 = memRead8(L1++);
@@ -1065,7 +1069,7 @@ do_tailcall:
             PUSH (0);                  // DestType
             PUSH (0);                  // Addr
             PUSH (L7);                 // PC
-            PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+            PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
             // Call the filter function.
             L1 = ioRock;
             L2 = 1;
@@ -1095,7 +1099,7 @@ do_tailcall:
             PUSH (0);                  // DestType
             PUSH (0);                  // Addr
             PUSH (L7);                 // PC
-            PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+            PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
             // Call the filter function.
             L1 = ioRock;
             L2 = 1;
@@ -1109,7 +1113,7 @@ do_tailcall:
         PUSH (11);                            // DestType
         PUSH (0);                             // Addr
         PUSH (READ_PC);                       // PC
-        PUSH ((git_sint32) (frame - base) * 4); // FramePtr
+        PUSH ((git_sint32) ((frame - base) * 4)); // FramePtr
 
         // Print the number.
         L7 = L1;
@@ -1271,10 +1275,10 @@ do_tailcall:
     
     do_mzero:
         if (L1 > 0) {
-			if (L2 < gRamStart || (L2 + L1) > gEndMem)
-				memWriteError(L2);
-			memset(gRam + L2, 0, L1);
-		}
+          if (L2 < gRamStart || (L2 + L1) > gEndMem)
+            memWriteError(L2);
+          memset(gMem + L2, 0, L1);
+        }
         NEXT;
         
     do_mcopy:
@@ -1283,19 +1287,7 @@ do_tailcall:
                 memReadError(L2);
             if (L3 < gRamStart || (L3 + L1) > gEndMem)
                 memWriteError(L3);
-            // ROM and ROM are stored separately, so this is a bit fiddly...
-            if (L2 > gRamStart) {
-                // Only need to copy from RAM. Might be overlapping, so use memmove.
-                memmove(gRam + L3, gRam + L2, L1);
-            } else if ((L2 + L1) <= gRamStart) {
-                // Only need to copy from ROM. Can't overlap, so memcpy is safe.
-                memcpy(gRam + L3, gRom + L2, L1);
-            } else {
-                // Need to copy from both ROM and RAM.
-                L4 = (L2 + L1) - gRamStart; // Amount of ROM to copy.
-                memcpy(gRam + L3, gRom + L2, L4);
-                memmove(gRam + L3 + L4, gRam + L2 + L4, L1 - L4);
-            }
+            memmove(gMem + L3, gMem + L2, L1);
         }
         NEXT;
         
